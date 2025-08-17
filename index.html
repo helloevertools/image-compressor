@@ -739,7 +739,22 @@
         let currentFile = null;
         let originalFileSize = 0;
         let compressedFileSize = 0;
-        
+        let downloadTimers = {}; // Track downloads for cleanup
+
+        // Function to schedule cleanup of resources
+        function scheduleCleanup(url, blob) {
+            const timerId = setTimeout(() => {
+                URL.revokeObjectURL(url);
+                if (blob && typeof blob.close === 'function') {
+                    blob.close();
+                }
+                delete downloadTimers[timerId];
+                console.log('Automatically cleaned up resources after 30 minutes');
+            }, 30 * 60 * 1000); // 30 minutes
+            
+            downloadTimers[timerId] = { url, blob };
+        }
+
         // Update quality value display
         qualitySlider.addEventListener('input', () => {
             qualityValue.textContent = `${qualitySlider.value}%`;
@@ -794,9 +809,6 @@
                 
                 // Enable compress button
                 compressBtn.disabled = false;
-                
-                // Track file upload (for analytics if you add them)
-                console.log('File selected:', currentFile.name, formatFileSize(originalFileSize));
             }
         }
         
@@ -866,22 +878,21 @@
                 const savingPercent = Math.round(((originalFileSize - compressedFileSize) / originalFileSize) * 100);
                 savings.textContent = `${savingPercent}%`;
                 
-                // Set up download link
-                const compressedFile = new File([compressedBlob], getOutputFilename(currentFile.name, outputFormat), {
-                    type: compressedBlob.type
-                });
+                // Set up download link with cleanup tracking
+                const downloadUrl = URL.createObjectURL(compressedBlob);
+                downloadBtn.href = downloadUrl;
+                downloadBtn.download = getOutputFilename(currentFile.name, outputFormat);
                 
-                downloadBtn.href = URL.createObjectURL(compressedFile);
-                downloadBtn.download = compressedFile.name;
+                // Schedule cleanup for this download URL
+                scheduleCleanup(downloadUrl, compressedBlob);
+                
+                // Track download clicks
+                downloadBtn.addEventListener('click', () => {
+                    console.log('Download started:', downloadBtn.download);
+                });
                 
                 // Show results
                 resultsSection.style.display = 'block';
-                
-                // Track successful compression (for analytics if you add them)
-                console.log('Compression successful:', 
-                    `Original: ${formatFileSize(originalFileSize)}`, 
-                    `Compressed: ${formatFileSize(compressedFileSize)}`, 
-                    `Savings: ${savingPercent}%`);
                 
             } catch (error) {
                 console.error('Compression error:', error);
@@ -984,6 +995,17 @@
             qualityValue.textContent = '80%';
             formatSelect.value = 'auto';
         }
+        
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            // Clean up all pending Object URLs
+            for (const timerId in downloadTimers) {
+                const { url } = downloadTimers[timerId];
+                URL.revokeObjectURL(url);
+                clearTimeout(timerId);
+            }
+            downloadTimers = {};
+        });
         
         // Initialize tool
         resetTool();
